@@ -1,0 +1,11 @@
+{
+  "name": "ai-gpt-mern",
+  "version": "1.0.0",
+  "description": "Lighthouse AI - MERN Stack Data Analytics Platform",
+  "scripts": {
+    "start:backend":  "cd backend && node server.js",
+    "start:frontend": "cd frontend && npm run dev",
+    "dev:backend":    "cd backend && npm run dev",
+    "install:all":    "cd backend && npm install && cd ../frontend && npm install"
+  }
+}
