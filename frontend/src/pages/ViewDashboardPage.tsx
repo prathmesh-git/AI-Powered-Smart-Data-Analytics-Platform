@@ -83,10 +83,10 @@ Export
         </div>
       </div>
 
-      {/* KPI Cards */}
+       {/* KPI Cards */}
       {dash.kpis?.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-          {dash.kpis.map((kpi, i) => <KPICard key={i} kpi={kpi} />)}
+        <div className="mb-5 py-4 flex gap-5 items-stretch overflow-x-auto">
+             {dash.kpis.map((kpi, i) => <KPICard key={i} kpi={kpi} />)}
         </div>
       )}
 
