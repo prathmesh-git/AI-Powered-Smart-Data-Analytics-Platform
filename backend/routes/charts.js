@@ -24,7 +24,16 @@ router.post('/ai/:fileId', requireAuth, async (req, res) => {
     if (result.error) {
       // Fallback to simple chart
       const fallback = buildSimpleChart(records, question);
-      return res.json({ chart: fallback, insight: 'Auto-generated chart (AI unavailable)', success: true, fallback: true });
+      const q = question.toLowerCase();
+      let insight = 'Auto-generated chart';
+      if (/(top|highest|best|rank)/.test(q)) insight = `Top results for: "${question}"`;
+      else if (/(trend|over time|growth)/.test(q)) insight = `Trend chart for: "${question}"`;
+      else if (/(distribution|spread|pie|count)/.test(q)) insight = `Distribution chart for: "${question}"`;
+      else if (/(average|mean|avg)/.test(q)) insight = `Average values for: "${question}"`;
+      else if (/(total|sum)/.test(q)) insight = `Totals for: "${question}"`;
+      else if (/(compar|var|differ)/.test(q)) insight = `Comparison chart for: "${question}"`;
+      else if (/(outlier|anomal)/.test(q)) insight = `Outlier analysis for: "${question}"`;
+      return res.json({ chart: fallback, insight, success: true, fallback: true });
     }
 
     res.json({ chart: result.chart, insight: result.insight, success: true });

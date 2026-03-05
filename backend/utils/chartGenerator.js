@@ -78,7 +78,13 @@ Rules:
       insight: parsed.insight || '',
     };
   } catch (err) {
-    console.error('OpenAI chart generation error:', err.message);
+    const isQuotaOrAuth = err?.status === 429 || err?.status === 401 ||
+      (err?.message || '').includes('429') || (err?.message || '').includes('401') ||
+      (err?.message || '').toLowerCase().includes('quota') ||
+      (err?.message || '').toLowerCase().includes('billing');
+    if (!isQuotaOrAuth) {
+      console.error('OpenAI chart generation error:', err.message);
+    }
     return { error: `AI chart generation failed: ${err.message}` };
   }
 }
@@ -119,7 +125,13 @@ Example: ["What is the distribution of X?", "Which Y has the highest Z?", ...]`;
     }
     return getDefaultSuggestions(columns);
   } catch (err) {
-    console.error('Suggestions error:', err.message);
+    const isQuotaOrAuth = err?.status === 429 || err?.status === 401 ||
+      (err?.message || '').includes('429') || (err?.message || '').includes('401') ||
+      (err?.message || '').toLowerCase().includes('quota') ||
+      (err?.message || '').toLowerCase().includes('billing');
+    if (!isQuotaOrAuth) {
+      console.error('Suggestions error:', err.message);
+    }
     return getDefaultSuggestions(columns);
   }
 }

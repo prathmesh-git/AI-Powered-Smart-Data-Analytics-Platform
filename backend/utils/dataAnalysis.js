@@ -189,39 +189,226 @@ function analyzeDataInternally(records, question) {
 
 /**
  * Build a simple chart data structure from the dataset for a given question.
- * Returns a Plotly-compatible trace array.
+ * Parses the question to select the appropriate chart type and columns.
  */
 function buildSimpleChart(records, question) {
   const q = question.toLowerCase();
   const { numericCols, catCols } = detectColumnTypes(records);
+  const allCols = Object.keys(records[0] || {});
 
   if (!records.length) return null;
 
-  // Distribution / bar chart
-  if (catCols.length && numericCols.length) {
-    const catCol = catCols[0];
-    const numCol = numericCols[0];
+  // Find columns explicitly mentioned in the question
+  const mentionedCols = allCols.filter(col => q.includes(col.toLowerCase()));
+  const mentionedNumCols = mentionedCols.filter(c => numericCols.includes(c));
+  const mentionedCatCols = mentionedCols.filter(c => catCols.includes(c));
 
+  // Best-fit columns: prefer mentioned, fall back to first detected
+  const targetNumCol = mentionedNumCols[0] || numericCols[0];
+  const targetCatCol = mentionedCatCols[0] || catCols[0];
+
+  // Helper: group records by a categorical column and aggregate a numeric column
+  function groupAndAggregate(catCol, numCol, agg = 'avg', limit = 15) {
     const grouped = {};
     records.forEach(r => {
       const k = String(r[catCol]);
       if (!grouped[k]) grouped[k] = [];
       grouped[k].push(parseFloat(r[numCol]) || 0);
     });
+    const entries = Object.entries(grouped).map(([k, vals]) => {
+      const total = vals.reduce((a, b) => a + b, 0);
+      return [k, agg === 'sum' ? total : total / vals.length];
+    });
+    return entries.slice(0, limit);
+  }
 
-    const labels = Object.keys(grouped).slice(0, 20);
-    const values = labels.map(k => grouped[k].reduce((a, b) => a + b, 0) / grouped[k].length);
+  // ── TOP / HIGHEST / RANKING ─────────────────────────────────────────────────
+  if (/(top|highest|maximum|best|rank|most)/.test(q)) {
+    const topN = parseInt(q.match(/top\s*(\d+)/)?.[1] || q.match(/(\d+)\s*record/)?.[1]) || 5;
+    if (targetCatCol && targetNumCol) {
+      const entries = groupAndAggregate(targetCatCol, targetNumCol, 'avg', 50)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topN);
+      return {
+        type: 'bar',
+        data: {
+          labels: entries.map(([k]) => k),
+          datasets: [{
+            label: `Top ${topN} ${targetCatCol} by ${targetNumCol}`,
+            data: entries.map(([, v]) => parseFloat(v.toFixed(2))),
+            backgroundColor: entries.map((_, i) => `hsl(${(i * 360 / entries.length)}, 70%, 60%)`),
+          }],
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top' } } },
+      };
+    }
+  }
 
+  // ── TREND / TIME SERIES ─────────────────────────────────────────────────────
+  if (/(trend|over time|time series|growth|change)/.test(q)) {
+    const timeCol = allCols.find(c => /time|date|year|month|period|quarter/i.test(c)) || targetCatCol;
+    const valueCol = targetNumCol;
+    if (timeCol && valueCol) {
+      const grouped = {};
+      records.forEach(r => {
+        const k = String(r[timeCol]);
+        if (!grouped[k]) grouped[k] = [];
+        grouped[k].push(parseFloat(r[valueCol]) || 0);
+      });
+      const labels = Object.keys(grouped).sort().slice(0, 30);
+      const values = labels.map(k => {
+        const arr = grouped[k];
+        return parseFloat((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2));
+      });
+      return {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: `${valueCol} over ${timeCol}`,
+            data: values,
+            borderColor: 'rgba(99, 102, 241, 1)',
+            backgroundColor: 'rgba(99, 102, 241, 0.15)',
+            fill: true,
+            tension: 0.4,
+          }],
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top' } } },
+      };
+    }
+  }
+
+  // ── DISTRIBUTION / PIE / COUNT ──────────────────────────────────────────────
+  if (/(distribution|spread|pie|count|how many|number of)/.test(q)) {
+    const col = mentionedCatCols[0] || catCols[0];
+    if (col) {
+      const counts = {};
+      records.forEach(r => { const k = String(r[col]); counts[k] = (counts[k] || 0) + 1; });
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+      return {
+        type: 'pie',
+        data: {
+          labels: sorted.map(([k]) => k),
+          datasets: [{
+            data: sorted.map(([, v]) => v),
+            backgroundColor: sorted.map((_, i) => `hsl(${i * 36}, 70%, 60%)`),
+          }],
+        },
+        options: { responsive: true, plugins: { legend: { position: 'right' } } },
+      };
+    }
+  }
+
+  // ── AVERAGE / MEAN ──────────────────────────────────────────────────────────
+  if (/(average|mean|avg)/.test(q) && targetCatCol && targetNumCol) {
+    const entries = groupAndAggregate(targetCatCol, targetNumCol, 'avg', 15);
     return {
       type: 'bar',
       data: {
-        labels,
+        labels: entries.map(([k]) => k),
         datasets: [{
-          label: `Avg ${numCol} by ${catCol}`,
-          data: values,
-          backgroundColor: labels.map((_, i) =>
-            `hsl(${(i * 360 / labels.length)}, 70%, 60%)`
-          ),
+          label: `Avg ${targetNumCol} by ${targetCatCol}`,
+          data: entries.map(([, v]) => parseFloat(v.toFixed(2))),
+          backgroundColor: entries.map((_, i) => `hsl(${(i * 360 / entries.length)}, 70%, 60%)`),
+        }],
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } },
+    };
+  }
+
+  // ── TOTAL / SUM ─────────────────────────────────────────────────────────────
+  if (/(total|sum|overall)/.test(q) && targetCatCol && targetNumCol) {
+    const entries = groupAndAggregate(targetCatCol, targetNumCol, 'sum', 15)
+      .sort((a, b) => b[1] - a[1]);
+    return {
+      type: 'bar',
+      data: {
+        labels: entries.map(([k]) => k),
+        datasets: [{
+          label: `Total ${targetNumCol} by ${targetCatCol}`,
+          data: entries.map(([, v]) => parseFloat(v.toFixed(2))),
+          backgroundColor: entries.map((_, i) => `hsl(${(i * 360 / entries.length)}, 65%, 55%)`),
+        }],
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } },
+    };
+  }
+
+  // ── COMPARE / VARY / CORRELATION ────────────────────────────────────────────
+  if (/(compar|var|differ|vs |versus|correlat)/.test(q)) {
+    if (numericCols.length >= 2) {
+      const xCol = mentionedNumCols[1] || numericCols[1];
+      const yCol = mentionedNumCols[0] || numericCols[0];
+      const sampleSize = Math.min(records.length, 100);
+      const step = Math.max(1, Math.floor(records.length / sampleSize));
+      const sampled = records.filter((_, i) => i % step === 0);
+      return {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: `${yCol} vs ${xCol}`,
+            data: sampled.map(r => ({ x: parseFloat(r[xCol]) || 0, y: parseFloat(r[yCol]) || 0 })),
+            backgroundColor: 'rgba(99, 102, 241, 0.6)',
+          }],
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top' } } },
+      };
+    }
+    if (targetCatCol && targetNumCol) {
+      const entries = groupAndAggregate(targetCatCol, targetNumCol, 'avg', 15);
+      return {
+        type: 'bar',
+        data: {
+          labels: entries.map(([k]) => k),
+          datasets: [{
+            label: `${targetNumCol} by ${targetCatCol}`,
+            data: entries.map(([, v]) => parseFloat(v.toFixed(2))),
+            backgroundColor: entries.map((_, i) => `hsl(${(i * 360 / entries.length)}, 70%, 60%)`),
+          }],
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top' } } },
+      };
+    }
+  }
+
+  // ── OUTLIER / ANOMALY ───────────────────────────────────────────────────────
+  if (/(outlier|anomal|unusual|extreme)/.test(q) && targetNumCol) {
+    const values = records.map(r => parseFloat(r[targetNumCol])).filter(v => !isNaN(v));
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const std = Math.sqrt(values.map(v => (v - mean) ** 2).reduce((a, b) => a + b, 0) / values.length);
+    const step = Math.max(1, Math.floor(records.length / 100));
+    const sampled = records.filter((_, i) => i % step === 0).slice(0, 100);
+    return {
+      type: 'scatter',
+      data: {
+        datasets: [{
+          label: `${targetNumCol} (outliers highlighted)`,
+          data: sampled.map((r, i) => ({ x: i + 1, y: parseFloat(r[targetNumCol]) || 0 })),
+          backgroundColor: sampled.map(r => {
+            const v = parseFloat(r[targetNumCol]) || 0;
+            return Math.abs(v - mean) > 2 * std ? 'rgba(239,68,68,0.8)' : 'rgba(99,102,241,0.4)';
+          }),
+          pointRadius: 5,
+        }],
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } },
+    };
+  }
+
+  // ── DEFAULT FALLBACK: use detected columns but vary by which cols are present ─
+  if (catCols.length && numericCols.length) {
+    // If a specific cat column is mentioned use it, otherwise pick from question context
+    const useCatCol = mentionedCatCols[0] || catCols[0];
+    const useNumCol = mentionedNumCols[0] || numericCols[0];
+    const entries = groupAndAggregate(useCatCol, useNumCol, 'avg', 15);
+    return {
+      type: 'bar',
+      data: {
+        labels: entries.map(([k]) => k),
+        datasets: [{
+          label: `Avg ${useNumCol} by ${useCatCol}`,
+          data: entries.map(([, v]) => parseFloat(v.toFixed(2))),
+          backgroundColor: entries.map((_, i) => `hsl(${(i * 360 / entries.length)}, 70%, 60%)`),
         }],
       },
       options: { responsive: true, plugins: { legend: { position: 'top' } } },
@@ -233,7 +420,6 @@ function buildSimpleChart(records, question) {
     const sampleSize = Math.min(records.length, 100);
     const step = Math.max(1, Math.floor(records.length / sampleSize));
     const sampled = records.filter((_, i) => i % step === 0);
-
     return {
       type: 'scatter',
       data: {
